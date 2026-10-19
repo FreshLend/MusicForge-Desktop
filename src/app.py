@@ -8,7 +8,7 @@ from PySide6.QtCore import QSettings, qInstallMessageHandler, QtMsgType
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication, QDialog
 
-from core.api import ApiClient, load_saved_base_url
+from core.api import ApiClient, load_saved_base_url, resource_path
 from core.i18n import Translator
 from src.auth import AuthDialog
 from src.main_window import MainWindow
@@ -267,7 +267,7 @@ def main():
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     app.setStyleSheet(STYLE)
     app.setFont(QFont('Inter', 10))
-    app.setWindowIcon(QIcon('icon.ico'))
+    app.setWindowIcon(QIcon(resource_path('icon.ico')))
 
     Translator.instance()
 

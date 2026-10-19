@@ -10,6 +10,12 @@ import requests
 from keyring.errors import KeyringError, PasswordDeleteError
 
 
+def resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+
 def _user_config_dir() -> Path:
     if sys.platform == 'win32':
         base = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')

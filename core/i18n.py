@@ -1,11 +1,17 @@
 import json
+import sys
 from pathlib import Path
 from typing import List
 
 from PySide6.QtCore import QObject, QSettings, Signal
 
 
-LANGS_DIR = Path(__file__).resolve().parent.parent / 'langs'
+if getattr(sys, 'frozen', False):
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+
+LANGS_DIR = BASE_DIR / 'langs'
 
 LANGUAGE_NAMES = {
     'en_US': 'English',
