@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QSlider, QStackedWidget,
                                QVBoxLayout, QWidget)
 
-from core.api import ApiClient, ApiError, resource_path
+from core.api import ApiClient, ApiError, get_app_icon_path
 from core.i18n import Translator, tr
 from src.discord_rpc import DiscordRPC
 from src.icons import get_svg_icon
@@ -52,10 +52,10 @@ class Sidebar(QWidget):
         logo_layout.setContentsMargins(10, 0, 0, 0)
         logo_layout.setSpacing(8)
 
-        app_icon = QIcon(resource_path('icon.ico'))
+        app_icon = QIcon(get_app_icon_path())
         if not app_icon.isNull():
             icon_label = QLabel()
-            icon_label.setPixmap(app_icon.pixmap(48, 48))
+            icon_label.setPixmap(app_icon.pixmap(24, 24))
             logo_layout.addWidget(icon_label)
 
         logo_text = QLabel('<span style="color:#00d4ff;">Music</span><span style="color:#ffffff;">Forge</span>')

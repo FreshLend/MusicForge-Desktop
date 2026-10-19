@@ -16,6 +16,16 @@ def resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 
+def get_app_icon_path() -> str:
+    if sys.platform == 'win32':
+        icon_name = 'icon.ico'
+    elif sys.platform == 'darwin':
+        icon_name = 'icon.icns'
+    else:
+        icon_name = 'icon.png'
+    return resource_path(os.path.join('src', 'assets', 'icons', icon_name))
+
+
 def _user_config_dir() -> Path:
     if sys.platform == 'win32':
         base = os.environ.get('APPDATA') or str(Path.home() / 'AppData' / 'Roaming')

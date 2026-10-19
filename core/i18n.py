@@ -11,7 +11,7 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
 
-LANGS_DIR = BASE_DIR / 'langs'
+LANGS_DIR = BASE_DIR / 'src' / 'langs'
 
 LANGUAGE_NAMES = {
     'en_US': 'English',

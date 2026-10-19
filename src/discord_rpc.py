@@ -1,4 +1,7 @@
 import time
+import asyncio
+import sys
+import warnings
 from typing import Dict, Optional
 
 from PySide6.QtCore import QObject, QSettings, Signal
@@ -64,7 +67,20 @@ class DiscordRPC(QObject):
         if self._connected:
             return
         try:
-            self._rpc = Presence(DISCORD_CLIENT_ID)
+            if sys.platform == 'win32':
+                loop = asyncio.SelectorEventLoop()
+            else:
+                loop = asyncio.new_event_loop()
+
+            def _suppress_closed_loop_errors(loop, context):
+                exc = context.get("exception")
+                if isinstance(exc, RuntimeError) and "Event loop is closed" in str(exc):
+                    return
+                loop.default_exception_handler(context)
+
+            loop.set_exception_handler(_suppress_closed_loop_errors)
+
+            self._rpc = Presence(DISCORD_CLIENT_ID, loop=loop)
             self._rpc.connect()
             self._connected = True
             self.availability_changed.emit(True)
