@@ -1,0 +1,172 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия для сборки'
+        required: true
+        default: 'T0'
+
+jobs:
+  build-windows:
+    name: Windows Build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          architecture: 'x64'
+
+      - name: Install deps
+        run: |
+          pip install pyinstaller
+          if (Test-Path requirements.txt) { pip install -r requirements.txt; }
+          choco install upx -y
+
+      - name: Build
+        run: pyinstaller build.spec
+        shell: pwsh
+
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $content = Get-Content -Path core/updater.py -Raw
+          $pattern = 'APP_VERSION\s*=\s*[''"]([^''"]+)[''"]'
+          $match = [regex]::Match($content, $pattern)
+          $VERSION = if ($match.Success) { $match.Groups[1].Value } else { "${{ github.event.inputs.version }}" }
+          echo "VERSION=$VERSION" >> $env:GITHUB_OUTPUT
+
+      - name: Rename
+        run: |
+          $file = Get-ChildItem -Path dist -Filter "MusicForge-*.exe" | Select-Object -First 1
+          $newname = "MusicForge-${{ steps.version.outputs.VERSION }}_win64.exe"
+          Move-Item -Path $file.FullName -Destination "dist/$newname" -Force
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: MusicForge-${{ steps.version.outputs.VERSION }}_win64
+          path: dist/MusicForge-${{ steps.version.outputs.VERSION }}_win64.exe
+
+  build-linux:
+    name: Linux Build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 upx
+          pip install pyinstaller
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Build
+        run: pyinstaller build.spec
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep -oP 'APP_VERSION\s*=\s*["'"'"']\K[^"'"'"']+' core/updater.py | head -1)
+          echo "VERSION=${VERSION:-${{ github.event.inputs.version }}}" >> $GITHUB_OUTPUT
+
+      - name: Prepare binary
+        run: |
+          BINARY=$(find dist -name "MusicForge-*" -type f | head -1)
+          cp "$BINARY" dist/musicforge
+          chmod +x dist/musicforge
+
+      - name: Create AppImage
+        run: |
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+          mkdir -p AppDir/usr/bin
+          cp dist/musicforge AppDir/usr/bin/musicforge
+
+          cat > AppDir/musicforge.desktop <<'EOF'
+          [Desktop Entry]
+          Name=MusicForge
+          Comment=MusicForge Desktop Client
+          Exec=musicforge
+          Icon=musicforge
+          Terminal=false
+          Type=Application
+          Categories=AudioVideo;Audio;Player;
+          StartupWMClass=MusicForge
+          EOF
+
+          cp src/assets/icons/icon.png AppDir/musicforge.png
+
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/musicforge" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir
+          mv MusicForge-*.AppImage "MusicForge-${{ steps.version.outputs.VERSION }}_x86-64.AppImage"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: MusicForge-${{ steps.version.outputs.VERSION }}_x86-64
+          path: MusicForge-${{ steps.version.outputs.VERSION }}_x86-64.AppImage
+
+  build-macos:
+    name: macOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install deps
+        run: |
+          pip install pyinstaller
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          brew install upx
+
+      - name: Build
+        run: pyinstaller build.spec
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep -oE 'APP_VERSION[[:space:]]*=[[:space:]]*"[^"]+"' core/updater.py | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "VERSION=${VERSION:-${{ github.event.inputs.version }}}" >> $GITHUB_OUTPUT
+
+      - name: Create DMG
+        run: |
+          APP_BUNDLE=$(find dist -name "*.app" -type d | head -n 1)
+          mkdir -p dmg_temp
+          cp -r "$APP_BUNDLE" dmg_temp/
+          ln -s /Applications dmg_temp/Applications
+          hdiutil create -volname "MusicForge ${{ steps.version.outputs.VERSION }}" \
+            -srcfolder dmg_temp \
+            -ov -format UDZO \
+            "MusicForge-${{ steps.version.outputs.VERSION }}_macos.dmg"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: MusicForge-${{ steps.version.outputs.VERSION }}_macos
+          path: MusicForge-${{ steps.version.outputs.VERSION }}_macos.dmg
