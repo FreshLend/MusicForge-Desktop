@@ -1,6 +1,6 @@
 # MusicForge Desktop
 
-Кроссплатформенный десктопный клиент для вашего собственного музыкального сервера **MusicForge-Web**. Написан на Python с использованием фреймворка PySide6 (Qt).
+Кроссплатформенный десктопный клиент для вашего собственного музыкального сервера [MusicForge-Web](https://github.com/FreshLend/MusicForge-Web). Написан на Python с использованием фреймворка PySide6 (Qt).
 
 ![MusicForge Desktop](preview.png)
 
