@@ -121,7 +121,7 @@ class SettingsPage(QWidget):
         self.logout_requested.emit()
 
     def _logout(self):
-        self.api.logout_and_forget()
+        self.api.logout()
         self.logout_requested.emit()
 
     def refresh(self):

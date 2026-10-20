@@ -210,7 +210,11 @@ class ApiClient:
         uid = acc.get('user_id')
         if not uid:
             return
-        self.access_token, self.refresh_token = _load_tokens(self.base_url, uid)
+        access, refresh = _load_tokens(self.base_url, uid)
+        if not access:
+            return
+        self.access_token = access
+        self.refresh_token = refresh
         self.store.data['current_user_id'] = uid
 
     def list_servers(self) -> List[str]:
@@ -436,6 +440,11 @@ class ApiClient:
         self.store.data['current_user_id'] = uid
         self.store.save()
 
+    def login_with_tokens(self, access_token: str, refresh_token: str):
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.me()
+
     def register(self, login: str, email: str, password: str, display_name: str = '') -> Dict:
         data = self._request(
             'POST', '/auth/register', auth=False,
@@ -461,29 +470,10 @@ class ApiClient:
         self._persist_current()
 
     def logout(self):
-        try:
-            self._request('POST', '/auth/logout')
-        except Exception:
-            pass
-        self.clear_auth()
-
-    def logout_and_forget(self):
-        user_id = self.store.data.get('current_user_id')
-        if user_id is None and self.user:
-            user_id = self.user.get('id')
-        if self.access_token:
-            try:
-                self._request('POST', '/auth/logout')
-            except Exception:
-                pass
-        if user_id:
-            _delete_tokens(self.base_url, user_id)
         self.access_token = None
         self.refresh_token = None
         self.user = None
-        self.store.remove_account(self.base_url, user_id)
         self.store.data['current_user_id'] = None
-        self._reconcile_base_url()
         self.store.save()
 
     def me(self) -> Dict:

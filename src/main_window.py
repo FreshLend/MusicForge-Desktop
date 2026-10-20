@@ -321,8 +321,21 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_discord_track(self, track: Dict):
+        if not track:
+            self.discord_rpc.update_track(None)
+            return
+        
+        rpc_track = dict(track)
+        
+        absolute_cover = self.api.cover_url(track)
+        if absolute_cover:
+            import time
+            rpc_track['cover_url'] = f"{absolute_cover}?v={int(time.time())}"
+        else:
+            rpc_track['cover_url'] = ''
+        
         context = getattr(self.player, 'context_name', None)
-        self.discord_rpc.update_track(track, context_name=context)
+        self.discord_rpc.update_track(rpc_track, context_name=context)
 
     def navigate(self, key: str):
         if key not in self._pages:

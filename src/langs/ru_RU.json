@@ -53,6 +53,10 @@
   "auth.security_title": "Безопасность",
   "auth.insecure_warning": "Адрес использует HTTP. Логин, пароль и токены будут передаваться по сети в открытом виде.\n\nПродолжить?",
   "auth.current_marker": " (текущий)",
+  "auth.google_login": "Войти через Google",
+  "auth.github_login": "Войти через GitHub",
+  "auth.quick_login": "Быстрый вход (через браузер)",
+  "auth.waiting_for_browser": "Ожидание входа в браузере...",
 
   "nav.home": "Главная",
   "nav.new": "Новинки",

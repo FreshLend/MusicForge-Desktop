@@ -53,6 +53,10 @@
   "auth.security_title": "Security",
   "auth.insecure_warning": "The address uses HTTP. Login, password and tokens will be sent over the network in plain text.\n\nContinue?",
   "auth.current_marker": " (current)",
+  "auth.google_login": "Login with Google",
+  "auth.github_login": "Login with GitHub",
+  "auth.quick_login": "Quick login (via browser)",
+  "auth.waiting_for_browser": "Waiting for browser login...",
 
   "nav.home": "Home",
   "nav.new": "New",
