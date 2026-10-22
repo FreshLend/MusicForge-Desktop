@@ -201,5 +201,9 @@
 
   "main.uploaded_message": "Загружен трек: {title}",
   "main.delete_title": "Удалить?",
-  "main.delete_confirm": "Удалить трек «{title}»?"
+  "main.delete_confirm": "Удалить трек «{title}»?",
+
+  "splash.starting": "Запуск...",
+  "splash.connecting": "Подключение к серверу...",
+  "splash.loading_ui": "Загрузка интерфейса..."
 }

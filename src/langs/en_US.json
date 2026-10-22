@@ -201,5 +201,9 @@
 
   "main.uploaded_message": "Uploaded track: {title}",
   "main.delete_title": "Delete?",
-  "main.delete_confirm": "Delete track “{title}”?"
+  "main.delete_confirm": "Delete track “{title}”?",
+
+  "splash.starting": "Starting...",
+  "splash.connecting": "Connecting to server...",
+  "splash.loading_ui": "Loading interface..."
 }

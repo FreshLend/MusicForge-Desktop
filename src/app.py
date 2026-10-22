@@ -4,15 +4,15 @@ import sys
 os.environ["QT_LOGGING_RULES"] = "qt.multimedia.*=false;*.debug=false;*.info=false"
 os.environ["QT_FFMPEG_DEBUG"] = "0"
 
-from PySide6.QtCore import QSettings, qInstallMessageHandler, QtMsgType
+from PySide6.QtCore import QSettings, qInstallMessageHandler, QtMsgType, Qt
 from PySide6.QtGui import QFont, QIcon
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import (QApplication, QDialog, QWidget, QVBoxLayout,
+                               QHBoxLayout, QLabel, QProgressBar, QFrame)
 
 from core.api import ApiClient, load_saved_base_url, get_app_icon_path
 from core.i18n import Translator, tr
 from src.auth import AuthDialog
 from src.main_window import MainWindow
-from src.pages.shared import apply_busy_cursor
 
 
 class FilteredStderr:
@@ -52,6 +52,72 @@ def qt_message_handler(mode, context, message):
 
 
 qInstallMessageHandler(qt_message_handler)
+
+
+class SplashScreen(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.SplashScreen)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(400, 220)
+        
+        screen = QApplication.primaryScreen().geometry()
+        self.move(screen.center() - self.rect().center())
+        
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        
+        container = QFrame()
+        container.setObjectName("SplashContainer")
+        outer.addWidget(container)
+        
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(32, 40, 32, 40)
+        layout.setSpacing(16)
+        
+        title_row = QHBoxLayout()
+        title_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        app_icon = QIcon(get_app_icon_path())
+        if not app_icon.isNull():
+            icon_label = QLabel()
+            icon_label.setPixmap(app_icon.pixmap(40, 40))
+            title_row.addWidget(icon_label)
+            
+        title = QLabel("MusicForge")
+        title.setStyleSheet("color: #ffffff; font-size: 28px; font-weight: 800; font-family: 'Inter', 'Segoe UI'; background: transparent; border: none;")
+        title_row.addWidget(title)
+        
+        layout.addLayout(title_row)
+        layout.addSpacing(10)
+        
+        self.status = QLabel(tr('splash.starting'))
+        self.status.setStyleSheet("color: #00d4ff; font-size: 14px; font-family: 'Inter', 'Segoe UI'; background: transparent; border: none;")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.status)
+        
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(4)
+        self.progress.setStyleSheet("""
+            QProgressBar { border: none; background: #1a1a28; border-radius: 2px; }
+            QProgressBar::chunk { background: #00d4ff; border-radius: 2px; }
+        """)
+        layout.addWidget(self.progress)
+        layout.addStretch()
+        
+        self.setStyleSheet("""
+            QFrame#SplashContainer {
+                background-color: #0d0d16;
+                border: 1px solid #1a1a28;
+                border-radius: 12px;
+            }
+        """)
+
+    def set_status(self, text: str):
+        self.status.setText(text)
+        QApplication.processEvents()
 
 
 STYLE = """
@@ -277,23 +343,36 @@ def main():
     except Exception as e:
         print(f'Warning: keyring backend unavailable: {e}', file=sys.stderr)
 
+    splash = SplashScreen()
+    splash.show()
+    QApplication.processEvents()
+
     api = ApiClient(load_saved_base_url())
 
     authenticated = False
     if api.is_authenticated():
+        splash.set_status(tr('splash.connecting'))
         try:
-            with apply_busy_cursor():
-                api.me()
+            api.me()
             authenticated = True
         except Exception:
             authenticated = False
 
     if not authenticated:
+        splash.close()
         dlg = AuthDialog(api)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return 0
+            
+        splash.show()
+        QApplication.processEvents()
 
+    splash.set_status(tr('splash.loading_ui'))
     window = MainWindow(api)
+    
+    app._main_window = window
+    
+    splash.close()
     window.show()
     
     return app.exec()
