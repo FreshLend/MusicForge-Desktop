@@ -9,7 +9,6 @@ from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication, QDialog
 
 from core.api import ApiClient, load_saved_base_url, get_app_icon_path
-from core.updater import UpdateCheckThread, APP_VERSION, GITHUB_REPO
 from core.i18n import Translator, tr
 from src.auth import AuthDialog
 from src.main_window import MainWindow
@@ -294,27 +293,7 @@ def main():
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return 0
 
-    def show_update_dialog(latest_tag, url):
-        from PySide6.QtWidgets import QMessageBox
-        msg = QMessageBox()
-        msg.setWindowTitle(tr('update.title'))
-        msg.setText(tr('update.text', latest=latest_tag, current=APP_VERSION))
-        msg.setIcon(QMessageBox.Icon.Information)
-        btn_yes = msg.addButton(tr('update.yes'), QMessageBox.ButtonRole.YesRole)
-        btn_no = msg.addButton(tr('update.no'), QMessageBox.ButtonRole.NoRole)
-        msg.exec()
-        
-        if msg.clickedButton() == btn_yes:
-            import webbrowser
-            webbrowser.open(url)
-
-    updater = UpdateCheckThread(GITHUB_REPO, APP_VERSION)
-    updater.update_available.connect(show_update_dialog)
-    updater.start()
-
     window = MainWindow(api)
     window.show()
-    
-    window._updater = updater 
     
     return app.exec()

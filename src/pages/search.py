@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit,
 
 from core.api import ApiClient
 from core.i18n import Translator, tr
-from src.pages.shared import apply_busy_cursor
+from src.pages.shared import ApiThread
 from src.player import Player
 from src.widgets import PlaylistCard, ResponsiveGrid, TrackCard
 
@@ -14,12 +14,15 @@ class SearchPage(QWidget):
     open_playlist = Signal(str)
     edit_track = Signal(dict)
     delete_track = Signal(dict)
+    open_track = Signal(str)
 
     def __init__(self, api: ApiClient, player: Player, main, parent=None):
         super().__init__(parent)
         self.api = api
         self.player = player
         self.main = main
+        self._tracks_count = 0
+        self._playlists_count = 0
 
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 24, 24, 24)
@@ -60,6 +63,8 @@ class SearchPage(QWidget):
         self.search_btn.setText(tr('search.button'))
         self.tabs.setTabText(0, tr('search.tab_tracks'))
         self.tabs.setTabText(1, tr('search.tab_playlists'))
+        if self._tracks_count or self._playlists_count:
+            self.status.setText(tr('search.results', tracks=self._tracks_count, playlists=self._playlists_count))
 
     def _make_grid_container(self) -> QWidget:
         scroll = QScrollArea()
@@ -89,29 +94,40 @@ class SearchPage(QWidget):
         q = self.query.text().strip()
         if not q:
             return
-        with apply_busy_cursor():
-            try:
-                tracks = self.api.search(q, 'tracks', 50)
-                playlists = self.api.search(q, 'playlists', 20)
-            except Exception as e:
-                self.status.setText(tr('search.error', message=str(e)))
-                return
-
+        self.status.setText(tr('common.loading'))
+        self._tracks_count = 0
+        self._playlists_count = 0
+        
+        t1 = ApiThread(self.api.search, q, 'tracks', 50)
+        t1.done.connect(self._on_tracks_found)
+        t1.failed.connect(lambda e: self.status.setText(tr('search.error', message=e)))
+        t1.start()
+        
+        t2 = ApiThread(self.api.search, q, 'playlists', 20)
+        t2.done.connect(self._on_playlists_found)
+        t2.failed.connect(lambda e: self.status.setText(tr('search.error', message=e)))
+        t2.start()
+        
+    def _on_tracks_found(self, tracks):
+        self._tracks_count = len(tracks)
         self.tracks_grid.clear()
         for t in tracks:
             card = TrackCard(t, self.api)
             card.play_requested.connect(self.player.play_track)
+            card.clicked.connect(self.open_track.emit)
             card.edit_requested.connect(self.edit_track.emit)
             card.delete_requested.connect(self.delete_track.emit)
             self.tracks_grid.add_widget(card)
+        self.status.setText(tr('search.results', tracks=self._tracks_count, playlists=self._playlists_count))
 
+    def _on_playlists_found(self, playlists):
+        self._playlists_count = len(playlists)
         self.playlists_grid.clear()
         for pl in playlists:
             card = PlaylistCard(pl, self.api)
             card.open_requested.connect(self.open_playlist.emit)
             self.playlists_grid.add_widget(card)
-
-        self.status.setText(tr('search.results', tracks=len(tracks), playlists=len(playlists)))
+        self.status.setText(tr('search.results', tracks=self._tracks_count, playlists=self._playlists_count))
 
     def refresh(self):
         pass

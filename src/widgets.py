@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
 
 from core.i18n import tr
 from src.icons import get_svg_icon
+from src.pages.shared import format_count
 
 
 class ImageCache:
@@ -86,7 +87,7 @@ class ClickableSlider(QSlider):
 
 
 class ResponsiveGrid(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, max_cols: int = 0):
         super().__init__(parent)
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -94,6 +95,7 @@ class ResponsiveGrid(QWidget):
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._items = []
         self._cols = 0
+        self._max_cols = max_cols
 
     def add_widget(self, w):
         self._items.append(w)
@@ -122,6 +124,8 @@ class ResponsiveGrid(QWidget):
         if w <= 0:
             return
         new_cols = max(1, (w + 16) // (item_width + 16))
+        if self._max_cols > 0:
+            new_cols = min(new_cols, self._max_cols)
         if new_cols != self._cols or self.grid.count() != len(self._items):
             self._cols = new_cols
             while self.grid.count():
@@ -196,6 +200,7 @@ class TrackCard(QFrame):
     play_requested = Signal(dict)
     edit_requested = Signal(dict)
     delete_requested = Signal(dict)
+    clicked = Signal(str)
 
     def __init__(self, track: Dict, api, parent=None):
         super().__init__(parent)
@@ -256,6 +261,10 @@ class TrackCard(QFrame):
         menu.addAction(act_del)
         menu.exec(self.mapToGlobal(pos))
 
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.track.get('id', ''))
+
     def mouseDoubleClickEvent(self, e):
         self.play_requested.emit(self.track)
 
@@ -268,6 +277,7 @@ class TrackRow(QFrame):
     history_delete_requested = Signal(dict)
     edit_requested = Signal(dict)
     delete_requested = Signal(dict)
+    clicked = Signal(str)
 
     def __init__(self, track: Dict, api, index: Optional[int] = None,
                  show_add: bool = False, show_remove: bool = False, show_fav: bool = True,
@@ -308,6 +318,12 @@ class TrackRow(QFrame):
         a.setObjectName('TrackRowArtist')
         v.addWidget(a)
         h.addLayout(v, 1)
+
+        plays_text = format_count(track.get('play_count', 0))
+        plays_label = QLabel(plays_text)
+        plays_label.setObjectName('TrackRowArtist')
+        plays_label.setStyleSheet("margin-right: 10px;")
+        h.addWidget(plays_label)
 
         can_edit = False
         if self.api.user:
@@ -368,6 +384,17 @@ class TrackRow(QFrame):
             rm.setFixedSize(36, 36)
             rm.clicked.connect(lambda: self.history_delete_requested.emit(self.track))
             h.addWidget(rm)
+
+    def set_active(self, active: bool):
+        if active:
+            self.setStyleSheet("QFrame { background: #1a1a28; border-left: 4px solid #00d4ff; }")
+        else:
+            self.setStyleSheet("")
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            if not self.childAt(e.position().toPoint()):
+                self.clicked.emit(self.track.get('id', ''))
 
     def mouseDoubleClickEvent(self, e):
         self.play_requested.emit(self.track)
@@ -432,7 +459,7 @@ class SectionWidget(QWidget):
     def set_title(self, title: str):
         self.title_label.setText(title)
 
-    def set_tracks(self, tracks: List[Dict], api, on_play, on_edit=None, on_delete=None):
+    def set_tracks(self, tracks: List[Dict], api, on_play, on_edit=None, on_delete=None, on_click=None):
         self.grid.clear()
         for t in tracks:
             card = TrackCard(t, api)
@@ -441,4 +468,6 @@ class SectionWidget(QWidget):
                 card.edit_requested.connect(on_edit)
             if on_delete:
                 card.delete_requested.connect(on_delete)
+            if on_click:
+                card.clicked.connect(on_click)
             self.grid.add_widget(card)

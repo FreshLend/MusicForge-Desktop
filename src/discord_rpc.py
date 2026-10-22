@@ -1,10 +1,9 @@
 import time
 import asyncio
 import sys
-import warnings
 from typing import Dict, Optional
 
-from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtCore import QObject, QSettings, Signal, QTimer
 from pypresence import Presence
 from pypresence.exceptions import DiscordNotFound, InvalidPipe
 from pypresence.types import ActivityType
@@ -42,6 +41,15 @@ class DiscordRPC(QObject):
         self._settings = QSettings('MusicForge', 'DiscordRPC')
         self._enabled = self._settings.value('enabled', True, type=bool)
         Translator.instance().language_changed.connect(self._refresh_presence)
+        
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setInterval(15000)
+        self._reconnect_timer.timeout.connect(self._check_connection)
+        self._reconnect_timer.start()
+
+    def _check_connection(self):
+        if self._enabled and not self._connected:
+            self.start()
 
     def is_enabled(self) -> bool:
         return self._enabled

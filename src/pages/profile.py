@@ -1,11 +1,12 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QPushButton, QScrollArea,
-                               QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout, 
+                               QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                               QScrollArea, QTabWidget, QVBoxLayout, QWidget)
 
 from core.api import ApiClient, ApiError
 from core.i18n import Translator, tr
 from src.icons import get_svg_icon
+from src.pages.shared import format_count, ApiThread
 from src.player import Player
 from src.widgets import (CoverImage, ImageCache, PlaylistCard, ResponsiveGrid,
                          TrackCard)
@@ -84,6 +85,7 @@ class ProfilePage(QWidget):
     open_playlist = Signal(str)
     edit_track = Signal(dict)
     delete_track = Signal(dict)
+    open_track = Signal(str)
 
     def __init__(self, api: ApiClient, player: Player, main, parent=None):
         super().__init__(parent)
@@ -92,6 +94,10 @@ class ProfilePage(QWidget):
         self.main = main
         self._force_avatar = False
         self._last_me = None
+        
+        self._page = 1
+        self._has_more = True
+        self._loading = False
 
         v = QVBoxLayout(self)
         v.setContentsMargins(32, 32, 32, 32)
@@ -165,20 +171,37 @@ class ProfilePage(QWidget):
     def _apply_stats(self, me):
         self.stats.setText(tr('profile.stats',
                               tracks=me.get('tracks_count', 0),
-                              likes=me.get('total_likes', 0),
-                              plays=me.get('total_plays', 0)))
+                              likes=format_count(me.get('total_likes', 0)),
+                              plays=format_count(me.get('total_plays', 0))))
 
     def _build_tracks_tab(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        inner = QWidget()
-        iv = QVBoxLayout(inner)
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        
+        sort_row = QHBoxLayout()
+        sort_row.addStretch()
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("Новые", "new")
+        self.sort_combo.addItem("Популярные", "popular")
+        self.sort_combo.addItem("Старые", "old")
+        self.sort_combo.currentIndexChanged.connect(self._refresh_tracks)
+        sort_row.addWidget(self.sort_combo)
+        v.addLayout(sort_row)
+        
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.inner = QWidget()
+        iv = QVBoxLayout(self.inner)
         iv.setContentsMargins(0, 0, 0, 0)
         self.tracks_grid = ResponsiveGrid()
         iv.addWidget(self.tracks_grid)
-        scroll.setWidget(inner)
-        return scroll
+        self.scroll.setWidget(self.inner)
+        v.addWidget(self.scroll, 1)
+        
+        self.scroll.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        return w
 
     def _build_playlists_tab(self) -> QWidget:
         scroll = QScrollArea()
@@ -203,15 +226,26 @@ class ProfilePage(QWidget):
             self.refresh()
 
     def refresh(self):
-        try:
-            me = self.api.me()
-        except Exception as e:
-            self.bio_label.setText(tr('common.error_prefix', message=str(e)))
+        if self._loading:
             return
+        self._loading = True
+            
+        t = ApiThread(self.api.me)
+        t.done.connect(self._on_me_loaded)
+        t.failed.connect(self._on_me_failed)
+        t.start()
+
+    def _on_me_failed(self, e):
+        self._loading = False
+        self.bio_label.setText(tr('common.error_prefix', message=e))
+
+    def _on_me_loaded(self, me):
+        self._loading = False
         self._last_me = me
         self.name_label.setText(me.get('display_name') or me.get('login', ''))
         self.login_label.setText(f"@{me.get('login', '')}")
         self.bio_label.setText(me.get('bio', '') or tr('profile.bio_empty'))
+        
         if me.get('is_admin'):
             self.admin_badge.show()
         else:
@@ -223,27 +257,60 @@ class ProfilePage(QWidget):
         self._force_avatar = False
         self.avatar.load(avatar_url, force=force)
 
-        try:
-            data = self.api.user_tracks(me['id'], page=1, per_page=100, own=True)
-            tracks = data.get('items', [])
-        except Exception:
-            tracks = []
-
-        self.tracks_grid.clear()
-        for t in tracks:
-            card = TrackCard(t, self.api)
-            card.play_requested.connect(self.player.play_track)
-            card.edit_requested.connect(self.edit_track.emit)
-            card.delete_requested.connect(self.delete_track.emit)
-            self.tracks_grid.add_widget(card)
-
-        try:
-            playlists = self.api.playlists_list()
-        except Exception:
-            playlists = []
-
+        self._refresh_tracks()
+        
+        t2 = ApiThread(self.api.playlists_list)
+        t2.done.connect(self._on_playlists_loaded)
+        t2.start()
+        
+    def _on_playlists_loaded(self, playlists):
         self.playlists_grid.clear()
         for pl in playlists:
             card = PlaylistCard(pl, self.api)
             card.open_requested.connect(self.open_playlist.emit)
             self.playlists_grid.add_widget(card)
+
+    def _refresh_tracks(self):
+        if not self._last_me:
+            return
+        self._page = 1
+        self._has_more = True
+        self.tracks_grid.clear()
+        self._load_tracks()
+
+    def _load_tracks(self):
+        if not self._last_me or self._loading or not self._has_more:
+            return
+        self._loading = True
+        me = self._last_me
+        sort_val = self.sort_combo.currentData()
+        
+        t = ApiThread(self.api.user_tracks, me['id'], page=self._page, per_page=20, sort=sort_val)
+        t.done.connect(self._on_tracks_loaded)
+        t.failed.connect(self._on_tracks_failed)
+        t.start()
+
+    def _on_tracks_failed(self, e):
+        self._loading = False
+
+    def _on_tracks_loaded(self, data):
+        self._loading = False
+        items = data.get('items', [])
+        self._has_more = data.get('page', 1) < data.get('pages', 1)
+        self._page += 1
+        
+        for t in items:
+            card = TrackCard(t, self.api)
+            card.play_requested.connect(self.player.play_track)
+            card.clicked.connect(self.open_track.emit)
+            card.edit_requested.connect(self.edit_track.emit)
+            card.delete_requested.connect(self.delete_track.emit)
+            self.tracks_grid.add_widget(card)
+        self.inner.updateGeometry()
+
+    def _on_scroll(self, value):
+        if self._loading or not self._has_more:
+            return
+        sb = self.scroll.verticalScrollBar()
+        if value >= sb.maximum() - 150:
+            self._load_tracks()

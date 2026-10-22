@@ -104,6 +104,7 @@
   "playlists.rename_prompt": "Новое название:",
   "playlists.delete_title": "Удалить?",
   "playlists.delete_confirm": "Удалить плейлист?",
+  "playlists.add_to": "В плейлист",
 
   "history.title": "История прослушивания",
   "history.count": "Записей: {count}",
@@ -184,6 +185,9 @@
   "track.edit_menu": "Редактировать",
   "track.delete_menu": "Удалить",
   "track.ai_suffix": " · AI",
+  "track.play": "Играть",
+  "track.plays": "Прослушиваний: {count}",
+  "track.tags": "Теги: {tags}",
   "playlist.public_badge": "Публичный",
   "playlist.private_badge": "Приватный",
   "playlist.tracks_count": "{count} треков",

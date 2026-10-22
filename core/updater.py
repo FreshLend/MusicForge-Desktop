@@ -1,8 +1,7 @@
 import requests
-import webbrowser
 from PySide6.QtCore import QThread, Signal
 
-APP_VERSION = "v1.1.0"
+APP_VERSION = "v1.2.0"
 GITHUB_REPO = "FreshLend/MusicForge-Desktop"
 
 

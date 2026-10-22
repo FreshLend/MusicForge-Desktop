@@ -104,6 +104,7 @@
   "playlists.rename_prompt": "New name:",
   "playlists.delete_title": "Delete?",
   "playlists.delete_confirm": "Delete playlist?",
+  "playlists.add_to": "Add to playlist",
 
   "history.title": "Listening history",
   "history.count": "Records: {count}",
@@ -184,6 +185,9 @@
   "track.edit_menu": "Edit",
   "track.delete_menu": "Delete",
   "track.ai_suffix": " · AI",
+  "track.play": "Play",
+  "track.plays": "Plays: {count}",
+  "track.tags": "Tags: {tags}",
   "playlist.public_badge": "Public",
   "playlist.private_badge": "Private",
   "playlist.tracks_count": "{count} tracks",

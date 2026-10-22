@@ -1,11 +1,10 @@
-from typing import Dict, List
-
-from PySide6.QtCore import Qt, QThread, Signal
+from concurrent.futures import ThreadPoolExecutor
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget)
 
 from core.api import ApiClient
 from core.i18n import Translator, tr
-from src.pages.shared import apply_busy_cursor
+from src.pages.shared import ApiThread
 from src.player import Player
 from src.widgets import ResponsiveGrid, SectionWidget, TrackCard
 
@@ -13,20 +12,23 @@ from src.widgets import ResponsiveGrid, SectionWidget, TrackCard
 class HomePage(QWidget):
     edit_track = Signal(dict)
     delete_track = Signal(dict)
+    open_track = Signal(str)
 
     def __init__(self, api: ApiClient, player: Player, main, parent=None):
         super().__init__(parent)
         self.api = api
         self.player = player
         self.main = main
+        self._loading = False
+        self._thread = None
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         inner = QWidget()
         iv = QVBoxLayout(inner)
@@ -42,8 +44,8 @@ class HomePage(QWidget):
         iv.addWidget(self.new_section)
         iv.addWidget(self.pop_section)
 
-        scroll.setWidget(inner)
-        v.addWidget(scroll)
+        self.scroll.setWidget(inner)
+        v.addWidget(self.scroll)
 
         Translator.instance().language_changed.connect(self.retranslate)
 
@@ -53,38 +55,39 @@ class HomePage(QWidget):
         self.pop_section.set_title(tr('home.popular_month'))
 
     def refresh(self):
-        try:
-            recs = self.api.recommendations(32)
-            new_data = self.api.list_tracks(page=1, per_page=16, sort='new')
-            pop_data = self.api.list_tracks(page=1, per_page=16, sort='popular')
-        except Exception:
-            recs, new_data, pop_data = [], {}, {}
-        self.rec_section.set_tracks(recs, self.api, self.player.play_track, self.edit_track.emit, self.delete_track.emit)
-        self.new_section.set_tracks(new_data.get('items', []), self.api, self.player.play_track, self.edit_track.emit, self.delete_track.emit)
-        self.pop_section.set_tracks(pop_data.get('items', []), self.api, self.player.play_track, self.edit_track.emit, self.delete_track.emit)
+        if self._loading:
+            return
+        self._loading = True
+        self._thread = ApiThread(self._fetch_all)
+        self._thread.done.connect(self._on_loaded)
+        self._thread.failed.connect(self._on_failed)
+        self._thread.start()
 
+    def _fetch_all(self):
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_recs = ex.submit(self.api.recommendations, 32)
+            f_new = ex.submit(self.api.list_tracks, page=1, per_page=16, sort='new')
+            f_pop = ex.submit(self.api.list_tracks, page=1, per_page=16, sort='popular')
+            return (f_recs.result(), f_new.result(), f_pop.result())
 
-class FetchThread(QThread):
-    done = Signal(dict)
-    failed = Signal(str)
+    def _on_loaded(self, data):
+        self._loading = False
+        recs, new_data, pop_data = data
+        self.rec_section.set_tracks(recs, self.api, self.player.play_track,
+                                    self.edit_track.emit, self.delete_track.emit, self.open_track.emit)
+        self.new_section.set_tracks(new_data.get('items', []), self.api, self.player.play_track,
+                                    self.edit_track.emit, self.delete_track.emit, self.open_track.emit)
+        self.pop_section.set_tracks(pop_data.get('items', []), self.api, self.player.play_track,
+                                    self.edit_track.emit, self.delete_track.emit, self.open_track.emit)
 
-    def __init__(self, func, page, per_page):
-        super().__init__()
-        self.func = func
-        self.page = page
-        self.per_page = per_page
-
-    def run(self):
-        try:
-            res = self.func(self.page, self.per_page)
-            self.done.emit(res)
-        except Exception as e:
-            self.failed.emit(str(e))
+    def _on_failed(self, err):
+        self._loading = False
 
 
 class GridPage(QWidget):
     edit_track = Signal(dict)
     delete_track = Signal(dict)
+    open_track = Signal(str)
 
     def __init__(self, api: ApiClient, player: Player, main, title_key: str, fetch_func, parent=None):
         super().__init__(parent)
@@ -156,10 +159,11 @@ class GridPage(QWidget):
             return
         self.loading = True
         self.status.setText(tr('common.loading'))
-        self.thread = FetchThread(self.fetch_func, self.page, 20)
-        self.thread.done.connect(self._on_loaded)
-        self.thread.failed.connect(self._on_error)
-        self.thread.start()
+        
+        t = ApiThread(self.fetch_func, self.page, 20)
+        t.done.connect(self._on_loaded)
+        t.failed.connect(self._on_error)
+        t.start()
 
     def _on_loaded(self, data):
         self.loading = False
@@ -169,6 +173,7 @@ class GridPage(QWidget):
         for t in items:
             card = TrackCard(t, self.api)
             card.play_requested.connect(self.player.play_track)
+            card.clicked.connect(self.open_track.emit)
             card.edit_requested.connect(self.edit_track.emit)
             card.delete_requested.connect(self.delete_track.emit)
             self.grid.add_widget(card)

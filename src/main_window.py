@@ -15,7 +15,8 @@ from src.pages import (EditTrackDialog, FavoritesPage, HistoryPage,
                        PlaylistsPage, PopularPage, ProfilePage, SearchPage,
                        SettingsPage, UploadDialog)
 from src.pages.shared import (apply_busy_cursor, ask_yes_no, fmt_time,
-                              show_error, show_info)
+                              show_error, show_info, ApiThread, cancel_all_threads)
+from src.pages.track import TrackPage
 from src.player import Player
 from src.widgets import CoverImage, ClickableSlider, ImageCache
 
@@ -284,6 +285,7 @@ class MainWindow(QMainWindow):
         self.history_page = HistoryPage(api, self.player, self)
         self.profile_page = ProfilePage(api, self.player, self)
         self.settings_page = SettingsPage(api, self.player, self)
+        self.track_page = TrackPage(api, self.player, self)
 
         self._add('home', self.home)
         self._add('new', self.new_page)
@@ -295,18 +297,30 @@ class MainWindow(QMainWindow):
         self._add('history', self.history_page)
         self._add('profile', self.profile_page)
         self._add('settings', self.settings_page)
+        self._add('track', self.track_page)
 
         self.search_page.open_playlist.connect(self.open_playlist)
         self.playlists_page.open_playlist.connect(self.open_playlist)
         self.profile_page.open_playlist.connect(self.open_playlist)
         self.playlist_detail.back_requested.connect(lambda: self.navigate('playlists'))
         self.settings_page.logout_requested.connect(self._on_logout)
+        self.track_page.back_requested.connect(self._go_back)
+        
+        self.home.open_track.connect(self.open_track)
+        self.new_page.open_track.connect(self.open_track)
+        self.popular_page.open_track.connect(self.open_track)
+        self.search_page.open_track.connect(self.open_track)
+        self.favorites_page.open_track.connect(self.open_track)
+        self.history_page.open_track.connect(self.open_track)
+        self.profile_page.open_track.connect(self.open_track)
+        self.playlist_detail.open_track.connect(self.open_track)
 
         for page in [self.home, self.new_page, self.popular_page,
                      self.search_page, self.profile_page]:
             page.edit_track.connect(self.on_edit_track)
             page.delete_track.connect(self.on_delete_track)
 
+        self._history = []
         self.navigate('home')
         self._apply_startup()
 
@@ -340,17 +354,40 @@ class MainWindow(QMainWindow):
     def navigate(self, key: str):
         if key not in self._pages:
             return
+        if self.stack.currentWidget() != self._pages[key]:
+            self._history.append(self.stack.currentWidget())
+        cancel_all_threads()
+        self._switch_to(key)
+
+    def _switch_to(self, key: str):
         page = self._pages[key]
-        try:
-            with apply_busy_cursor():
-                if hasattr(page, 'refresh'):
-                    page.refresh()
-        except Exception as e:
-            show_error(self, str(e))
+        if hasattr(page, 'refresh'):
+            page.refresh()
         self.stack.setCurrentWidget(page)
         self.sidebar.set_active(key)
 
+    def _go_back(self):
+        if self._history:
+            prev = self._history.pop()
+            self.stack.setCurrentWidget(prev)
+            for k, v in self._pages.items():
+                if v == prev:
+                    self.sidebar.set_active(k)
+                    break
+        else:
+            self.navigate('home')
+
+    def open_track(self, tid: str):
+        if self.stack.currentWidget() != self.track_page:
+            self._history.append(self.stack.currentWidget())
+        self.track_page.load(tid)
+        self.stack.setCurrentWidget(self.track_page)
+        for k, b in self.sidebar.buttons.items():
+            b.setChecked(False)
+
     def open_playlist(self, pid: str):
+        if self.stack.currentWidget() != self.playlist_detail:
+            self._history.append(self.stack.currentWidget())
         self.playlist_detail.load(pid)
         self.stack.setCurrentWidget(self.playlist_detail)
         for k, b in self.sidebar.buttons.items():
@@ -394,15 +431,13 @@ class MainWindow(QMainWindow):
     def _refresh_current_page(self):
         ImageCache.instance().clear()
         current = self.stack.currentWidget()
-        try:
-            with apply_busy_cursor():
-                if hasattr(current, 'refresh'):
-                    current.refresh()
-        except Exception as e:
-            show_error(self, str(e))
+        if hasattr(current, 'refresh'):
+            current.refresh()
 
     def _on_logout(self):
         global _ACTIVE_WINDOW
+        for t in list(ApiThread._active_threads):
+            t.wait(2000)
         self.player.stop()
         self.discord_rpc.stop()
         self.close()
@@ -417,5 +452,8 @@ class MainWindow(QMainWindow):
             sys.exit(0)
 
     def closeEvent(self, event):
+        cancel_all_threads()
+        for t in list(ApiThread._active_threads):
+            t.wait(2000)
         self.discord_rpc.stop()
         super().closeEvent(event)

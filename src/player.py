@@ -1,7 +1,6 @@
 from typing import Dict, List, Optional
-
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, QSettings
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QMediaDevices
 
 
 class Player(QObject):
@@ -27,6 +26,7 @@ class Player(QObject):
         self.player.durationChanged.connect(lambda _: self._on_pos(self.player.position()))
         self.player.playbackStateChanged.connect(self._on_state)
         self.player.mediaStatusChanged.connect(self._on_status)
+        self.player.errorOccurred.connect(self._on_error)
 
         self.audio.volumeChanged.connect(self._on_volume_changed)
 
@@ -35,13 +35,33 @@ class Player(QObject):
         self.context_name: Optional[str] = None
         self._listen_reported: set = set()
         self._current_id: Optional[str] = None
+        
         self._listen_timer = QTimer(self)
         self._listen_timer.setInterval(2000)
         self._listen_timer.timeout.connect(self._maybe_report)
 
+        self._device_timer = QTimer(self)
+        self._device_timer.setInterval(2000)
+        self._device_timer.timeout.connect(self._check_audio_device)
+        self._device_timer.start()
+
     def _on_volume_changed(self):
         self.settings.setValue("volume", self.audio.volume())
         self.volume_changed.emit(self.audio.volume())
+
+    def _check_audio_device(self):
+        default_device = QMediaDevices.defaultAudioOutput()
+        if default_device and self.audio.device().id() != default_device.id():
+            self.audio.setDevice(default_device)
+
+    def _on_error(self, error, error_string):
+        if error == QMediaPlayer.Error.NoError:
+            return
+        QTimer.singleShot(3000, self._retry_play)
+
+    def _retry_play(self):
+        if self.player.error() != QMediaPlayer.Error.NoError and self.queue:
+            self._play_current()
 
     def _on_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -49,7 +69,6 @@ class Player(QObject):
                 self.player.setPosition(0)
                 self.player.play()
                 return
-
             if len(self.queue) > 1:
                 self.next()
             else:
@@ -75,8 +94,8 @@ class Player(QObject):
                 self._listen_reported.add(tid)
                 try:
                     self.api.track_listen(tid)
-                except Exception as e:
-                    print(f"listen report failed: {e}")
+                except Exception:
+                    pass
             self._listen_timer.stop()
 
     def play_track(self, track: Dict):

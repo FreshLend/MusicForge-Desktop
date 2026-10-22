@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -8,6 +9,8 @@ from urllib.parse import urlparse
 import keyring
 import requests
 from keyring.errors import KeyringError, PasswordDeleteError
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 def resource_path(relative_path):
@@ -189,10 +192,26 @@ class ApiClient:
             self.base_url = normalize_base_url(base_url)
         except ValueError:
             self.base_url = DEFAULT_BASE_URL
+        
         self.session = requests.Session()
+        retry = Retry(
+            total=2,
+            backoff_factor=0.3,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["GET", "HEAD", "OPTIONS"]
+        )
+        adapter = HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=40,
+            max_retries=retry
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+        
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.user: Optional[Dict[str, Any]] = None
+        self._refresh_lock = threading.Lock()
         self._restore_session()
 
     def _restore_session(self):
@@ -365,11 +384,22 @@ class ApiClient:
             if r.ok:
                 return r.content
             raise ApiError(r.status_code, 'bad_response', r.text[:200])
-        if not r.ok or (isinstance(data, dict) and data.get('ok') is False):
-            err = data.get('error', {}) if isinstance(data, dict) else {}
-            raise ApiError(r.status_code, err.get('code', 'error'),
-                           err.get('message', f'HTTP {r.status_code}'))
-        return data.get('data') if isinstance(data, dict) else data
+
+        is_dict = isinstance(data, dict)
+        ok_flag = data.get('ok') if is_dict else None
+        err = data.get('error', {}) if is_dict else {}
+
+        if ok_flag is False or not r.ok:
+            if isinstance(err, dict):
+                raise ApiError(r.status_code, err.get('code', 'error'),
+                               err.get('message', f'HTTP {r.status_code}'))
+            raise ApiError(r.status_code, 'error',
+                           str(err) if err else f'HTTP {r.status_code}')
+
+        if is_dict and ok_flag is True and 'data' in data:
+            return data['data']
+
+        return data
 
     def _request(self, method: str, path: str, *, auth: bool = True,
                  retry: bool = True, timeout: int = 300, **kwargs) -> Any:
@@ -399,26 +429,29 @@ class ApiClient:
         return self._handle(r)
 
     def _try_refresh(self) -> bool:
-        try:
-            r = self.session.post(
-                f'{self.base_url}/api/v1/auth/refresh',
-                json={'refresh_token': self.refresh_token},
-                timeout=20,
-                allow_redirects=False,
-            )
-            if not r.ok:
+        with self._refresh_lock:
+            if not self.refresh_token:
                 return False
-            data = r.json().get('data', {})
-            new_access = data.get('access_token')
-            new_refresh = data.get('refresh_token') or self.refresh_token
-            if not new_access:
+            try:
+                r = self.session.post(
+                    f'{self.base_url}/api/v1/auth/refresh',
+                    json={'refresh_token': self.refresh_token},
+                    timeout=20,
+                    allow_redirects=False,
+                )
+                if not r.ok:
+                    return False
+                data = r.json().get('data', {})
+                new_access = data.get('access_token')
+                new_refresh = data.get('refresh_token') or self.refresh_token
+                if not new_access:
+                    return False
+                self.access_token = new_access
+                self.refresh_token = new_refresh
+                self._persist_current()
+                return True
+            except Exception:
                 return False
-            self.access_token = new_access
-            self.refresh_token = new_refresh
-            self._persist_current()
-            return True
-        except Exception:
-            return False
 
     def _persist_current(self):
         if not self.user:
@@ -635,11 +668,11 @@ class ApiClient:
         return self._request('GET', '/search',
                              params={'q': q, 'type': kind, 'limit': limit}).get('items', [])
 
-    def favorites(self) -> List[Dict]:
-        return self._request('GET', '/favorites').get('items', [])
+    def favorites(self, page=1, per_page=50) -> Dict:
+        return self._request('GET', '/favorites', params={'page': page, 'per_page': per_page})
 
-    def history(self) -> List[Dict]:
-        return self._request('GET', '/history').get('items', [])
+    def history(self, page=1, per_page=50) -> Dict:
+        return self._request('GET', '/history', params={'page': page, 'per_page': per_page})
 
     def history_delete(self, tid: str):
         self._request('DELETE', f'/history/{tid}')
@@ -680,10 +713,8 @@ class ApiClient:
     def user_get(self, uid: str) -> Dict:
         return self._request('GET', f'/users/{uid}')
 
-    def user_tracks(self, uid: str, page=1, per_page=50, own=False) -> Dict:
-        params = {'page': page, 'per_page': per_page}
-        if own:
-            params['own'] = '1'
+    def user_tracks(self, uid: str, page=1, per_page=100, sort='new') -> Dict:
+        params = {'page': page, 'per_page': per_page, 'sort': sort}
         return self._request('GET', f'/users/{uid}/tracks', params=params)
 
     def user_playlists(self, uid: str) -> List[Dict]:
