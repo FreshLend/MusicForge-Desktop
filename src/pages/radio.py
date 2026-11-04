@@ -69,9 +69,12 @@ def _rounded_icon(pix: QPixmap, size: int, radius: int) -> QPixmap:
 
 
 class AddStationDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, station=None):
         super().__init__(parent)
-        self.setWindowTitle(tr('radio.add_title'))
+        self.station = station
+        self.is_edit = station is not None
+
+        self.setWindowTitle(tr('radio.edit_title') if self.is_edit else tr('radio.add_title'))
         self.setMinimumWidth(480)
 
         self._name = ''
@@ -86,6 +89,11 @@ class AddStationDialog(QDialog):
         self.name_input.setPlaceholderText(tr('radio.name_placeholder'))
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(tr('radio.url_placeholder'))
+
+        if self.is_edit:
+            self.name_input.setText(station.get('name', ''))
+            self.url_input.setText(station.get('url', ''))
+
         form.addRow(tr('radio.name_label'), self.name_input)
         form.addRow(tr('radio.url_label'), self.url_input)
         v.addLayout(form)
@@ -135,6 +143,7 @@ class AddStationDialog(QDialog):
 
 class RadioRow(QFrame):
     play_requested = Signal(dict)
+    edit_requested = Signal(dict)
     delete_requested = Signal(dict)
 
     ICON_SIZE = 48
@@ -187,6 +196,14 @@ class RadioRow(QFrame):
         play_btn.setFixedSize(36, 36)
         play_btn.clicked.connect(self._emit_play)
         h.addWidget(play_btn)
+
+        edit_btn = QPushButton()
+        edit_btn.setIcon(get_svg_icon('settings', '#a8a8c0', 20))
+        edit_btn.setObjectName('RowBtn')
+        edit_btn.setFixedSize(36, 36)
+        edit_btn.clicked.connect(
+            lambda: self.edit_requested.emit(self.station))
+        h.addWidget(edit_btn)
 
         del_btn = QPushButton()
         del_btn.setIcon(get_svg_icon('trash', '#ff6b6b', 20))
@@ -287,6 +304,7 @@ class RadioPage(QWidget):
             for station in stations:
                 row = RadioRow(station)
                 row.play_requested.connect(self._on_play)
+                row.edit_requested.connect(self._on_edit)
                 row.delete_requested.connect(self._on_delete)
                 self.list_layout.addWidget(row)
                 self._rows.append(row)
@@ -309,6 +327,14 @@ class RadioPage(QWidget):
         dlg = AddStationDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.stations.add(dlg.get_name(), dlg.get_url())
+            self._reload()
+
+    def _on_edit(self, station: dict):
+        dlg = AddStationDialog(self, station=station)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            new_name = dlg.get_name()
+            new_url = dlg.get_url()
+            self.stations.update(station['url'], new_name, new_url)
             self._reload()
 
     def _on_play(self, station: dict):

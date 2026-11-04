@@ -50,6 +50,17 @@ class RadioStations:
         self._save()
         return True
 
+    def update(self, old_url: str, name: str, url: str) -> bool:
+        if not name or not url:
+            return False
+        for s in self._stations:
+            if s['url'] == old_url:
+                s['name'] = name
+                s['url'] = url
+                self._save()
+                return True
+        return False
+
     def remove(self, url: str) -> bool:
         before = len(self._stations)
         self._stations = [s for s in self._stations if s['url'] != url]

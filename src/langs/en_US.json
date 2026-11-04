@@ -83,6 +83,7 @@
   "radio.add": "Add station",
   "radio.add_title": "Add radio station",
   "radio.name_label": "Station name",
+  "radio.edit_title": "Edit station",
   "radio.url_label": "Stream URL",
   "radio.name_placeholder": "My favorite station",
   "radio.url_placeholder": "https://example.com/stream.ogg",

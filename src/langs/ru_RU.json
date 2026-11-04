@@ -83,6 +83,7 @@
   "radio.add": "Добавить станцию",
   "radio.add_title": "Добавить радиостанцию",
   "radio.name_label": "Название",
+  "radio.edit_title": "Редактировать станцию",
   "radio.url_label": "Ссылка на поток",
   "radio.name_placeholder": "Моя любимая станция",
   "radio.url_placeholder": "https://example.com/stream.ogg",
