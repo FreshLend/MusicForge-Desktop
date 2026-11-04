@@ -39,7 +39,13 @@ class ImageCache:
             self.pending[url].append(cb)
             return
         self.pending[url] = [cb]
-        self.nam.get(QNetworkRequest(QUrl(url)))
+        req = QNetworkRequest(QUrl(url))
+        req.setHeader(
+            QNetworkRequest.KnownHeaders.UserAgentHeader,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36")
+        self.nam.get(req)
 
     def invalidate(self, url: str):
         self.cache.pop(url, None)
@@ -149,6 +155,9 @@ class CoverImage(QLabel):
 
     def load(self, url: str, force: bool = False):
         if not url:
+            if self._url:
+                self._url = ''
+                self.setPixmap(QPixmap())
             return
         if not force and url == self._url:
             return

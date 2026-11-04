@@ -14,6 +14,7 @@ from src.pages import (EditTrackDialog, FavoritesPage, HistoryPage,
                        HomePage, NewReleasesPage, PlaylistDetailPage,
                        PlaylistsPage, PopularPage, ProfilePage, SearchPage,
                        SettingsPage, UploadDialog)
+from src.pages.radio import RadioPage
 from src.pages.shared import (apply_busy_cursor, ask_yes_no, fmt_time,
                               show_error, show_info, ApiThread, cancel_all_threads)
 from src.pages.track import TrackPage
@@ -32,6 +33,7 @@ class Sidebar(QWidget):
         ('home', 'home', 'nav.home'),
         ('new', 'new', 'nav.new'),
         ('popular', 'fire', 'nav.popular'),
+        ('radio', 'radio', 'nav.radio'),
         ('search', 'search', 'nav.search'),
         ('favorites', 'heart', 'nav.favorites'),
         ('playlists', 'folder', 'nav.playlists'),
@@ -186,6 +188,7 @@ class PlayerBar(QWidget):
         self.player.track_changed.connect(self._on_track)
         self.player.state_changed.connect(self._on_state)
         self.player.position_changed.connect(self._on_pos)
+        self.player.buffering_changed.connect(self._on_buffering)
 
         self._update_nav_visibility()
 
@@ -199,13 +202,30 @@ class PlayerBar(QWidget):
         if not t:
             self.title.setText('—')
             self.artist.setText('')
-            self.cover.clear()
+            self.cover.load('')
             self._update_nav_visibility()
             return
         self.title.setText(t.get('title', ''))
-        self.artist.setText(t.get('artist', ''))
-        self.cover.load(self.api.cover_url(t))
+        self._update_artist()
+        cover = self.api.cover_url(t)
+        self.cover.load(cover)
         self._update_nav_visibility()
+
+    def _update_artist(self):
+        t = self.player.current_track()
+        if not t:
+            self.artist.setText('')
+            return
+        if t.get('is_radio'):
+            if self.player.is_buffering():
+                self.artist.setText(tr('radio.connecting'))
+            else:
+                self.artist.setText(tr('radio.station_label'))
+        else:
+            self.artist.setText(t.get('artist', ''))
+
+    def _on_buffering(self, b: bool):
+        self._update_artist()
 
     def _update_nav_visibility(self):
         multi = len(self.player.queue) > 1
@@ -278,6 +298,7 @@ class MainWindow(QMainWindow):
         self.home = HomePage(api, self.player, self)
         self.new_page = NewReleasesPage(api, self.player, self)
         self.popular_page = PopularPage(api, self.player, self)
+        self.radio_page = RadioPage(api, self.player, self)
         self.search_page = SearchPage(api, self.player, self)
         self.favorites_page = FavoritesPage(api, self.player, self)
         self.playlists_page = PlaylistsPage(api, self.player, self)
@@ -290,6 +311,7 @@ class MainWindow(QMainWindow):
         self._add('home', self.home)
         self._add('new', self.new_page)
         self._add('popular', self.popular_page)
+        self._add('radio', self.radio_page)
         self._add('search', self.search_page)
         self._add('favorites', self.favorites_page)
         self._add('playlists', self.playlists_page)
@@ -305,7 +327,7 @@ class MainWindow(QMainWindow):
         self.playlist_detail.back_requested.connect(lambda: self.navigate('playlists'))
         self.settings_page.logout_requested.connect(self._on_logout)
         self.track_page.back_requested.connect(self._go_back)
-        
+
         self.home.open_track.connect(self.open_track)
         self.new_page.open_track.connect(self.open_track)
         self.popular_page.open_track.connect(self.open_track)
@@ -338,17 +360,21 @@ class MainWindow(QMainWindow):
         if not track:
             self.discord_rpc.update_track(None)
             return
-        
+
         rpc_track = dict(track)
-        
+
         absolute_cover = self.api.cover_url(track)
         if absolute_cover:
             import time
             rpc_track['cover_url'] = f"{absolute_cover}?v={int(time.time())}"
         else:
             rpc_track['cover_url'] = ''
-        
+
         context = getattr(self.player, 'context_name', None)
+        
+        if track.get('is_radio'):
+            context = None
+            
         self.discord_rpc.update_track(rpc_track, context_name=context)
 
     def navigate(self, key: str):
