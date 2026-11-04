@@ -41,10 +41,10 @@ class SettingsPage(QWidget):
         self.account_label.setTextFormat(Qt.TextFormat.PlainText)
         v.addWidget(self.account_label)
 
-        form = QFormLayout()
+        self._form = QFormLayout()
         self.server_label = QLabel(tr('settings.server'))
         self.server_edit = QLineEdit(self.api.base_url)
-        form.addRow(self.server_label, self.server_edit)
+        self._form.addRow(self.server_label, self.server_edit)
 
         self.language_label = QLabel(tr('common.language'))
         self.lang_combo = QComboBox()
@@ -54,14 +54,14 @@ class SettingsPage(QWidget):
         if idx >= 0:
             self.lang_combo.setCurrentIndex(idx)
         self.lang_combo.currentIndexChanged.connect(self._on_language_changed)
-        form.addRow(self.language_label, self.lang_combo)
+        self._form.addRow(self.language_label, self.lang_combo)
 
         self.rpc_checkbox = QCheckBox(tr('settings.discord_rpc'))
         self.rpc_checkbox.setChecked(self.main.discord_rpc.is_enabled())
         self.rpc_checkbox.toggled.connect(self.main.discord_rpc.set_enabled)
-        form.addRow(self.rpc_checkbox)
+        self._form.addRow(self.rpc_checkbox)
 
-        v.addLayout(form)
+        v.addLayout(self._form)
 
         self.change_server_btn = QPushButton(tr('settings.change_server'))
         self.change_server_btn.setObjectName('PrimaryBtn')
@@ -84,7 +84,6 @@ class SettingsPage(QWidget):
         self.server_label.setText(tr('settings.server'))
         self.language_label.setText(tr('common.language'))
         self.change_server_btn.setText(tr('settings.change_server'))
-        self.logout_btn.setText(tr('settings.logout'))
         self.http_badge.setText(tr('settings.insecure_badge'))
         self.http_badge.setToolTip(tr('settings.insecure_tooltip'))
         self.rpc_checkbox.setText(tr('settings.discord_rpc'))
@@ -96,6 +95,8 @@ class SettingsPage(QWidget):
             Translator.instance().set_language(code)
 
     def _save_server(self):
+        if getattr(self.main, 'guest', False):
+            return
         url = self.server_edit.text().strip()
         if not url:
             return
@@ -125,6 +126,22 @@ class SettingsPage(QWidget):
         self.logout_requested.emit()
 
     def refresh(self):
+        guest = getattr(self.main, 'guest', False)
+        self.logout_btn.setText(tr('settings.sign_in') if guest else tr('settings.logout'))
+
+        if guest:
+            self.account_label.setText(tr('settings.guest_mode'))
+            self.server_edit.setVisible(False)
+            self.server_label.setVisible(False)
+            self.change_server_btn.setVisible(False)
+            self.http_badge.hide()
+            self._form.setRowVisible(self.rpc_checkbox, False)
+            return
+
+        self.server_edit.setVisible(True)
+        self.server_label.setVisible(True)
+        self.change_server_btn.setVisible(True)
+        self._form.setRowVisible(self.rpc_checkbox, True)
         self.server_edit.setText(self.api.base_url)
         if self.api.base_url.startswith('https://'):
             self.http_badge.hide()

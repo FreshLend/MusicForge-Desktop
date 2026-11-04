@@ -34,7 +34,7 @@ class OAuthReceiver:
         s.close()
 
         receiver = self
-        
+
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 parsed = urllib.parse.urlparse(self.path)
@@ -42,13 +42,13 @@ class OAuthReceiver:
                     query = urllib.parse.parse_qs(parsed.query)
                     code = query.get('code', [None])[0]
                     state = query.get('state', [None])[0]
-                    
+
                     if state != receiver.expected_state:
                         self.send_response(400)
                         self.end_headers()
                         self.wfile.write(b"Invalid state")
                         return
-                        
+
                     receiver.code = code
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -62,10 +62,10 @@ class OAuthReceiver:
                 pass
 
         self.server = HTTPServer(('127.0.0.1', self.port), Handler)
-        
+
         def run():
             self.server.handle_request()
-            
+
         threading.Thread(target=run, daemon=True).start()
 
     def stop(self):
@@ -80,6 +80,7 @@ class AuthDialog(QDialog):
     def __init__(self, api: ApiClient, parent=None):
         super().__init__(parent)
         self.api = api
+        self.guest_mode = False
         self.setWindowTitle(tr('auth.window_title'))
         self.setMinimumWidth(520)
 
@@ -108,6 +109,11 @@ class AuthDialog(QDialog):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         v.addWidget(self.status)
 
+        self.guest_btn = QPushButton(tr('auth.guest_mode'))
+        self.guest_btn.setObjectName('GhostBtn')
+        self.guest_btn.clicked.connect(self._continue_guest)
+        v.addWidget(self.guest_btn)
+
         lang_row = QHBoxLayout()
         lang_row.addStretch()
         self.lang_label = QLabel(tr('common.language'))
@@ -125,6 +131,11 @@ class AuthDialog(QDialog):
         Translator.instance().language_changed.connect(self.retranslate)
 
         self._refresh_after_change()
+
+    def _continue_guest(self):
+        self._stop_oauth()
+        self.guest_mode = True
+        self.accept()
 
     def _on_language_changed(self, idx):
         code = self.lang_combo.itemData(idx)
@@ -213,7 +224,7 @@ class AuthDialog(QDialog):
         self.back_btn.setObjectName('GhostBtn')
         self.back_btn.clicked.connect(self._show_choose_page)
         v.addWidget(self.back_btn)
-        
+
         self._update_oauth_visibility()
         return w
 
@@ -229,7 +240,7 @@ class AuthDialog(QDialog):
         self.password_label = QLabel(tr('auth.password'))
         f.addRow(self.login_label, self.login_input)
         f.addRow(self.password_label, self.login_password)
-        
+
         self.login_btn = QPushButton(tr('auth.login'))
         self.login_btn.setObjectName('PrimaryBtn')
         self.login_btn.clicked.connect(self._do_login)
@@ -247,18 +258,18 @@ class AuthDialog(QDialog):
         self.oauth_widget = QWidget()
         oauth_layout = QHBoxLayout(self.oauth_widget)
         oauth_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.google_btn = QPushButton(tr('auth.google_login'))
         self.google_btn.setObjectName('GhostBtn')
         self.google_btn.clicked.connect(lambda: self._do_web_login('/auth/google/login'))
-        
+
         self.github_btn = QPushButton(tr('auth.github_login'))
         self.github_btn.setObjectName('GhostBtn')
         self.github_btn.clicked.connect(lambda: self._do_web_login('/auth/github/login'))
-        
+
         oauth_layout.addWidget(self.google_btn)
         oauth_layout.addWidget(self.github_btn)
-        
+
         f.addRow('', self.oauth_widget)
         return w
 
@@ -283,7 +294,7 @@ class AuthDialog(QDialog):
         f.addRow(self.reg_password_label, self.reg_password)
         f.addRow(self.reg_password2_label, self.reg_password2)
         f.addRow(self.reg_name_label, self.reg_name)
-        
+
         self.reg_btn = QPushButton(tr('auth.register'))
         self.reg_btn.setObjectName('PrimaryBtn')
         self.reg_btn.clicked.connect(self._do_register)
@@ -301,24 +312,25 @@ class AuthDialog(QDialog):
         self.reg_oauth_widget = QWidget()
         reg_oauth_layout = QHBoxLayout(self.reg_oauth_widget)
         reg_oauth_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.reg_google_btn = QPushButton(tr('auth.google_login'))
         self.reg_google_btn.setObjectName('GhostBtn')
         self.reg_google_btn.clicked.connect(lambda: self._do_web_login('/auth/google/login'))
-        
+
         self.reg_github_btn = QPushButton(tr('auth.github_login'))
         self.reg_github_btn.setObjectName('GhostBtn')
         self.reg_github_btn.clicked.connect(lambda: self._do_web_login('/auth/github/login'))
-        
+
         reg_oauth_layout.addWidget(self.reg_google_btn)
         reg_oauth_layout.addWidget(self.reg_github_btn)
-        
+
         f.addRow('', self.reg_oauth_widget)
         return w
 
     def retranslate(self):
         self.setWindowTitle(tr('auth.window_title'))
         self.title_label.setText(tr('auth.title'))
+        self.guest_btn.setText(tr('auth.guest_mode'))
         self.lang_label.setText(tr('common.language'))
         self.server_label.setText(tr('settings.server'))
         self.empty_hint.setText(tr('auth.no_accounts'))
@@ -360,13 +372,13 @@ class AuthDialog(QDialog):
             self.quick_login_widget.setVisible(False)
             self.reg_quick_widget.setVisible(False)
             return
-            
+
         if not url.startswith('http://') and not url.startswith('https://'):
             url = 'https://' + url
-        
+
         self.quick_login_widget.setVisible(True)
         self.reg_quick_widget.setVisible(True)
-        
+
         is_https = url.startswith('https://')
         self.oauth_widget.setVisible(is_https)
         self.reg_oauth_widget.setVisible(is_https)
@@ -471,18 +483,18 @@ class AuthDialog(QDialog):
         self.server_edit.setText(server_url)
         self._update_server_hint()
         self._update_oauth_visibility()
-        
+
         accounts = self.api.list_accounts(server_url)
         login = ''
         for acc in accounts:
             if acc.get('user_id') == user_id:
                 login = acc.get('login', '')
                 break
-                
+
         self.login_input.setText(login)
         self.login_password.clear()
         self.login_password.setFocus()
-        
+
         self.back_btn.setVisible(self.api.has_any_account())
         self.stack.setCurrentWidget(self.add_page)
         self.tabs.setCurrentWidget(self.login_tab)
@@ -493,7 +505,7 @@ class AuthDialog(QDialog):
             self.status.setText(tr('auth.choose_account'))
             return
         server_url, user_id = item.data(Qt.ItemDataRole.UserRole)
-        
+
         with apply_busy_cursor():
             switched = self.api.switch_account(server_url, user_id)
             if switched:
@@ -515,7 +527,7 @@ class AuthDialog(QDialog):
                 except Exception as e:
                     self.status.setText(tr('common.error_prefix', message=str(e)))
                     return
-        
+
         self._show_add_page_for_login(server_url, user_id)
 
     def _forget_account(self):
@@ -586,18 +598,18 @@ class AuthDialog(QDialog):
     def _do_web_login(self, endpoint_path):
         if not self._sync_server():
             return
-            
+
         self._stop_oauth()
         state = secrets.token_urlsafe(16)
         self._oauth_receiver = OAuthReceiver(expected_state=state)
         self._oauth_receiver.start()
         redirect_uri = f"http://127.0.0.1:{self._oauth_receiver.port}/callback"
-        
+
         url = f"{self.api.base_url}{endpoint_path}?desktop_redirect={urllib.parse.quote(redirect_uri)}&state={state}"
         QDesktopServices.openUrl(QUrl(url))
-        
+
         self.status.setText(tr('auth.waiting_for_browser'))
-        
+
         self._oauth_timer = QTimer(self)
         self._oauth_timer.timeout.connect(self._check_oauth)
         self._oauth_timer.start(500)
@@ -608,7 +620,7 @@ class AuthDialog(QDialog):
             self._oauth_receiver.stop()
             code = self._oauth_receiver.code
             self._oauth_receiver = None
-            
+
             with apply_busy_cursor():
                 try:
                     r = requests.post(f"{self.api.base_url}/api/v1/auth/exchange", json={'code': code})

@@ -1,6 +1,18 @@
+import os
+import sys
 from typing import Dict, List, Optional
+from time import monotonic
+
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, QSettings
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QMediaDevices
+
+
+_DEBUG = bool(os.environ.get('MUSICFORGE_PLAYER_DEBUG'))
+
+
+def _dbg(msg: str) -> None:
+    if _DEBUG:
+        print(f'[player] {msg}', file=sys.stderr)
 
 
 class Player(QObject):
@@ -28,6 +40,7 @@ class Player(QObject):
         self.player.playbackStateChanged.connect(self._on_state)
         self.player.mediaStatusChanged.connect(self._on_status)
         self.player.errorOccurred.connect(self._on_error)
+        self.player.bufferProgressChanged.connect(self._on_buffer_progress)
 
         self.audio.volumeChanged.connect(self._on_volume_changed)
 
@@ -49,15 +62,30 @@ class Player(QObject):
         self._buffering = False
         self._user_paused = False
         self._stream_error_count = 0
+        self._last_activity = 0.0
+        self._paused_at = 0.0
 
         self._stream_watchdog = QTimer(self)
         self._stream_watchdog.setSingleShot(True)
-        self._stream_watchdog.setInterval(90000)
+        self._stream_watchdog.setInterval(10000)
         self._stream_watchdog.timeout.connect(self._on_stream_timeout)
 
         self._stream_retry_timer = QTimer(self)
         self._stream_retry_timer.setSingleShot(True)
         self._stream_retry_timer.timeout.connect(self._restart_stream)
+
+        self._stall_timer = QTimer(self)
+        self._stall_timer.setInterval(2000)
+        self._stall_timer.timeout.connect(self._check_stall)
+
+        self._reset_errors_timer = QTimer(self)
+        self._reset_errors_timer.setSingleShot(True)
+        self._reset_errors_timer.setInterval(3000)
+        self._reset_errors_timer.timeout.connect(self._reset_stream_errors)
+
+    def _reset_stream_errors(self):
+        _dbg('error counter reset')
+        self._stream_error_count = 0
 
     def _set_buffering(self, b: bool):
         if self._buffering == b:
@@ -70,6 +98,20 @@ class Player(QObject):
     def is_buffering(self) -> bool:
         return self._buffering
 
+    def _schedule_stream_retry(self, delay_ms: Optional[int] = None):
+        if self._user_paused:
+            return
+        track = self.current_track()
+        if not track or not track.get('is_radio'):
+            return
+        if delay_ms is None:
+            delay_ms = min(5000, 2000 * (2 ** min(self._stream_error_count, 2)))
+        self._stream_error_count += 1
+        _dbg(f'retry scheduled in {delay_ms}ms (errors={self._stream_error_count})')
+        self._reset_errors_timer.stop()
+        self._stream_retry_timer.stop()
+        self._stream_retry_timer.start(delay_ms)
+
     def _on_stream_timeout(self):
         if not self._buffering:
             return
@@ -79,20 +121,44 @@ class Player(QObject):
         track = self.current_track()
         if not track or not track.get('is_radio'):
             return
-        self._stream_error_count += 1
-        if self._stream_error_count <= 3:
-            self._restart_stream()
-        else:
-            self._set_buffering(False)
+        _dbg('watchdog timeout')
+        self._set_buffering(False)
+        self._schedule_stream_retry()
+
+    def _on_buffer_progress(self, progress: int):
+        self._last_activity = monotonic()
+
+    def _check_stall(self):
+        if self._user_paused:
+            return
+        track = self.current_track()
+        if not track or not track.get('is_radio'):
+            return
+        if self._buffering:
+            return
+        idle = monotonic() - self._last_activity
+        if idle > 5:
+            _dbg(f'stall detected ({int(idle)}s idle), restarting')
+            self._last_activity = monotonic()
+            self._schedule_stream_retry(0)
 
     def _restart_stream(self):
+        if self._user_paused:
+            return
         track = self.current_track()
         if not track or not track.get('is_radio'):
             return
         url = track.get('audio_url', '')
         if not url:
             return
-        self.play_stream(track.get('title', ''), url)
+        _dbg(f'restart {url}')
+        self._last_activity = monotonic()
+        self._set_buffering(True)
+        self._stream_watchdog.start()
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.player.setSource(QUrl(url))
+        self.player.play()
 
     def _on_volume_changed(self):
         self.settings.setValue("volume", self.audio.volume())
@@ -108,15 +174,11 @@ class Player(QObject):
             return
         track = self.current_track()
         is_radio = bool(track and track.get('is_radio'))
+        _dbg(f'error {error}: {error_string} (radio={is_radio})')
         if is_radio:
             self._stream_watchdog.stop()
-            self._stream_retry_timer.stop()
-            self._stream_error_count += 1
-            if self._stream_error_count > 3:
-                self._set_buffering(False)
-                return
-            delay = 5000 if not self._buffering else 30000
-            self._stream_retry_timer.start(delay)
+            self._set_buffering(False)
+            self._schedule_stream_retry()
             return
         QTimer.singleShot(3000, self._retry_play)
 
@@ -131,17 +193,23 @@ class Player(QObject):
         if is_radio:
             if status in (QMediaPlayer.MediaStatus.LoadedMedia,
                           QMediaPlayer.MediaStatus.BufferedMedia):
+                _dbg(f'status ok ({status.name})')
+                self._last_activity = monotonic()
                 self._set_buffering(False)
-                self._stream_error_count = 0
                 if not self._user_paused:
                     if self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                         self.player.play()
-            elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+                if not self._reset_errors_timer.isActive():
+                    self._reset_errors_timer.start()
+            elif status in (QMediaPlayer.MediaStatus.InvalidMedia,
+                            QMediaPlayer.MediaStatus.StalledMedia):
+                _dbg(f'status bad ({status.name})')
                 self._set_buffering(False)
+                self._schedule_stream_retry()
             elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+                _dbg('status end of media')
                 self._set_buffering(False)
-                if self._stream_error_count <= 3:
-                    self._stream_retry_timer.start(3000)
+                self._schedule_stream_retry(1000)
             return
 
         self._set_buffering(False)
@@ -157,6 +225,8 @@ class Player(QObject):
 
     def _on_state(self, state):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
+        if playing:
+            self._last_activity = monotonic()
         self.state_changed.emit(playing)
         if playing:
             self._listen_timer.start()
@@ -164,6 +234,7 @@ class Player(QObject):
             self._listen_timer.stop()
 
     def _on_pos(self, pos):
+        self._last_activity = monotonic()
         self.position_changed.emit(int(pos), int(self.player.duration()))
 
     def _maybe_report(self):
@@ -203,12 +274,30 @@ class Player(QObject):
         self.context_name = context_name
         self._play_current()
 
+    def _start_radio_source(self, track: Dict):
+        self.context_name = track.get('title', '')
+        self._current_id = track['id']
+        self._listen_reported.clear()
+        self._user_paused = False
+        self._stream_error_count = 0
+        self._stream_retry_timer.stop()
+        self._reset_errors_timer.stop()
+        self._last_activity = monotonic()
+        self._stall_timer.start()
+        self._stream_watchdog.start()
+        self._set_buffering(True)
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.player.setSource(QUrl(track.get('audio_url', '')))
+        self.player.play()
+        self.track_changed.emit(track)
+
     def play_stream(self, name: str, url: str, cover_url: str = ''):
         current = self.current_track()
         if current and current.get('is_radio') and current.get('audio_url') == url:
-            self.toggle()
-            return
-
+            if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState and not self._user_paused:
+                self.toggle()
+                return
         track = {
             'id': f'radio:{url}',
             'title': name,
@@ -219,33 +308,25 @@ class Player(QObject):
         }
         self.queue = [track]
         self.index = 0
-        self.context_name = name
-        self._current_id = track['id']
-        self._listen_reported.clear()
-        self._user_paused = False
-        self._stream_error_count = 0
-        self._stream_retry_timer.stop()
-
-        self.player.stop()
-        self._set_buffering(True)
-        self._stream_watchdog.start()
-        self.player.setSource(QUrl(url))
-        self.player.play()
-        self.track_changed.emit(track)
+        self._start_radio_source(track)
 
     def _play_current(self):
         if self.index < 0 or self.index >= len(self.queue):
             return
         track = self.queue[self.index]
         if track.get('is_radio'):
-            self.play_stream(track.get('title', ''), track.get('audio_url', ''),
-                             track.get('cover_url', ''))
+            self._start_radio_source(track)
             return
         tid = track.get('id')
         url = track.get('audio_url') or self.api.stream_url(tid)
         url = self.api.absolute(url)
         self._current_id = tid
         self._user_paused = False
+        self._stall_timer.stop()
+        self._stream_retry_timer.stop()
+        self._reset_errors_timer.stop()
+        self._stream_watchdog.stop()
+        self._set_buffering(False)
         self.player.setSource(QUrl(url))
         self.player.play()
         self.track_changed.emit(track)
@@ -253,9 +334,15 @@ class Player(QObject):
     def toggle(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._user_paused = True
+            self._paused_at = monotonic()
             self.player.pause()
         else:
             self._user_paused = False
+            track = self.current_track()
+            if track and track.get('is_radio'):
+                if monotonic() - self._paused_at > 3:
+                    self._restart_stream()
+                    return
             if self.player.source().isEmpty() and self.queue:
                 self._play_current()
             else:
@@ -276,6 +363,8 @@ class Player(QObject):
     def stop(self):
         self._stream_watchdog.stop()
         self._stream_retry_timer.stop()
+        self._stall_timer.stop()
+        self._reset_errors_timer.stop()
         self._set_buffering(False)
         self.player.stop()
         self.player.setSource(QUrl())

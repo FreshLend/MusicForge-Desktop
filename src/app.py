@@ -60,42 +60,42 @@ class SplashScreen(QWidget):
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.SplashScreen)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(400, 220)
-        
+
         screen = QApplication.primaryScreen().geometry()
         self.move(screen.center() - self.rect().center())
-        
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        
+
         container = QFrame()
         container.setObjectName("SplashContainer")
         outer.addWidget(container)
-        
+
         layout = QVBoxLayout(container)
         layout.setContentsMargins(32, 40, 32, 40)
         layout.setSpacing(16)
-        
+
         title_row = QHBoxLayout()
         title_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         app_icon = QIcon(get_app_icon_path())
         if not app_icon.isNull():
             icon_label = QLabel()
             icon_label.setPixmap(app_icon.pixmap(40, 40))
             title_row.addWidget(icon_label)
-            
+
         title = QLabel("MusicForge")
         title.setStyleSheet("color: #ffffff; font-size: 28px; font-weight: 800; font-family: 'Inter', 'Segoe UI'; background: transparent; border: none;")
         title_row.addWidget(title)
-        
+
         layout.addLayout(title_row)
         layout.addSpacing(10)
-        
+
         self.status = QLabel(tr('splash.starting'))
         self.status.setStyleSheet("color: #00d4ff; font-size: 14px; font-family: 'Inter', 'Segoe UI'; background: transparent; border: none;")
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.status)
-        
+
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
@@ -106,7 +106,7 @@ class SplashScreen(QWidget):
         """)
         layout.addWidget(self.progress)
         layout.addStretch()
-        
+
         self.setStyleSheet("""
             QFrame#SplashContainer {
                 background-color: #0d0d16;
@@ -358,21 +358,23 @@ def main():
         except Exception:
             authenticated = False
 
+    guest = False
     if not authenticated:
         splash.close()
         dlg = AuthDialog(api)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return 0
-            
+        guest = dlg.guest_mode
+
         splash.show()
         QApplication.processEvents()
 
     splash.set_status(tr('splash.loading_ui'))
-    window = MainWindow(api)
-    
+    window = MainWindow(api, guest=guest)
+
     app._main_window = window
-    
+
     splash.close()
     window.show()
-    
+
     return app.exec()

@@ -26,6 +26,7 @@
   "auth.check": "Проверить",
   "auth.login_tab": "Вход",
   "auth.register_tab": "Регистрация",
+  "auth.guest_mode": "Продолжить без аккаунта",
   "auth.back_to_accounts": "← К списку аккаунтов",
   "auth.login_placeholder": "Логин или Email",
   "auth.login_label": "Логин",
@@ -153,6 +154,8 @@
   "settings.server_unreachable_confirm": "Не удалось подключиться к серверу. Сохранить адрес всё равно?",
   "settings.current_account": "Текущий аккаунт: @{login} на {url}",
   "settings.current_server": "Текущий сервер: {url}",
+  "settings.guest_mode": "Гостевой режим. Войдите, чтобы разблокировать всё.",
+  "settings.sign_in": "Войти в аккаунт",
 
   "update.title": "Доступно обновление",
   "update.text": "Доступна новая версия {latest} (у вас {current}).\n\nПерейти на GitHub для скачивания?",

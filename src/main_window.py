@@ -1,6 +1,6 @@
 from typing import Dict
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QMainWindow,
                                QPushButton, QSlider, QStackedWidget,
@@ -28,6 +28,8 @@ _ACTIVE_WINDOW = None
 class Sidebar(QWidget):
     navigate = Signal(str)
     upload_clicked = Signal()
+
+    GUEST_ALLOWED = {'radio', 'settings'}
 
     BUTTONS = [
         ('home', 'home', 'nav.home'),
@@ -89,6 +91,11 @@ class Sidebar(QWidget):
         v.addWidget(self.upload_btn)
 
         Translator.instance().language_changed.connect(self.retranslate)
+
+    def set_guest_mode(self, enabled: bool):
+        for key, btn in self.buttons.items():
+            btn.setVisible(not enabled or key in self.GUEST_ALLOWED)
+        self.upload_btn.setVisible(not enabled)
 
     def retranslate(self):
         for key, b in self.buttons.items():
@@ -207,7 +214,10 @@ class PlayerBar(QWidget):
             return
         self.title.setText(t.get('title', ''))
         self._update_artist()
-        cover = self.api.cover_url(t)
+        if t.get('is_radio'):
+            cover = t.get('cover_url', '') or ''
+        else:
+            cover = self.api.cover_url(t)
         self.cover.load(cover)
         self._update_nav_visibility()
 
@@ -252,9 +262,10 @@ class PlayerBar(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, api: ApiClient, parent=None):
+    def __init__(self, api: ApiClient, guest: bool = False, parent=None):
         super().__init__(parent)
         self.api = api
+        self.guest = guest
         self.player = Player(api, self)
 
         self.discord_rpc = DiscordRPC(self)
@@ -264,7 +275,8 @@ class MainWindow(QMainWindow):
             lambda playing: self.discord_rpc.update_paused(not playing)
         )
         self.player.position_changed.connect(self.discord_rpc.sync_position)
-        self.discord_rpc.start()
+        if not guest:
+            QTimer.singleShot(500, self._start_discord_safe)
 
         self.setWindowTitle('MusicForge')
         self.resize(1280, 800)
@@ -281,6 +293,8 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         self.sidebar.navigate.connect(self.navigate)
         self.sidebar.upload_clicked.connect(self.open_upload)
+        if guest:
+            self.sidebar.set_guest_mode(True)
         body.addWidget(self.sidebar)
 
         self.stack = QStackedWidget()
@@ -343,8 +357,15 @@ class MainWindow(QMainWindow):
             page.delete_track.connect(self.on_delete_track)
 
         self._history = []
-        self.navigate('home')
-        self._apply_startup()
+        self.navigate('radio' if guest else 'home')
+        if not guest:
+            self._apply_startup()
+
+    def _start_discord_safe(self):
+        try:
+            self.discord_rpc.start()
+        except BaseException:
+            pass
 
     def _add(self, key: str, widget: QWidget):
         self._pages[key] = widget
@@ -363,25 +384,31 @@ class MainWindow(QMainWindow):
 
         rpc_track = dict(track)
 
-        absolute_cover = self.api.cover_url(track)
-        if absolute_cover:
-            import time
-            rpc_track['cover_url'] = f"{absolute_cover}?v={int(time.time())}"
+        if track.get('is_radio'):
+            rpc_track['cover_url'] = track.get('cover_url', '') or ''
         else:
-            rpc_track['cover_url'] = ''
+            absolute_cover = self.api.cover_url(track)
+            if absolute_cover:
+                import time
+                rpc_track['cover_url'] = f"{absolute_cover}?v={int(time.time())}"
+            else:
+                rpc_track['cover_url'] = ''
 
         context = getattr(self.player, 'context_name', None)
-        
+
         if track.get('is_radio'):
             context = None
-            
+
         self.discord_rpc.update_track(rpc_track, context_name=context)
 
     def navigate(self, key: str):
         if key not in self._pages:
             return
-        if self.stack.currentWidget() != self._pages[key]:
-            self._history.append(self.stack.currentWidget())
+        if self.guest and key not in Sidebar.GUEST_ALLOWED:
+            return
+        if not self.guest:
+            if self.stack.currentWidget() != self._pages[key]:
+                self._history.append(self.stack.currentWidget())
         cancel_all_threads()
         self._switch_to(key)
 
@@ -404,6 +431,8 @@ class MainWindow(QMainWindow):
             self.navigate('home')
 
     def open_track(self, tid: str):
+        if self.guest:
+            return
         if self.stack.currentWidget() != self.track_page:
             self._history.append(self.stack.currentWidget())
         self.track_page.load(tid)
@@ -412,6 +441,8 @@ class MainWindow(QMainWindow):
             b.setChecked(False)
 
     def open_playlist(self, pid: str):
+        if self.guest:
+            return
         if self.stack.currentWidget() != self.playlist_detail:
             self._history.append(self.stack.currentWidget())
         self.playlist_detail.load(pid)
@@ -420,6 +451,8 @@ class MainWindow(QMainWindow):
             b.setChecked(False)
 
     def open_upload(self):
+        if self.guest:
+            return
         dlg = UploadDialog(self.api, self)
         dlg.uploaded.connect(self._on_uploaded)
         dlg.exec()
@@ -434,6 +467,8 @@ class MainWindow(QMainWindow):
             pass
 
     def on_edit_track(self, track: Dict):
+        if self.guest:
+            return
         dlg = EditTrackDialog(self.api, track, self)
         dlg.updated.connect(lambda: self._on_track_edited(track))
         dlg.exec()
@@ -445,6 +480,8 @@ class MainWindow(QMainWindow):
             self.player_bar.cover.load(self.api.cover_url(current), force=True)
 
     def on_delete_track(self, track: Dict):
+        if self.guest:
+            return
         if not ask_yes_no(self, tr('main.delete_title'),
                           tr('main.delete_confirm', title=track.get('title', ''))):
             return
@@ -470,7 +507,7 @@ class MainWindow(QMainWindow):
         from src.auth import AuthDialog
         dlg = AuthDialog(self.api, None)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            new = MainWindow(self.api)
+            new = MainWindow(self.api, guest=dlg.guest_mode)
             new.show()
             _ACTIVE_WINDOW = new
         else:

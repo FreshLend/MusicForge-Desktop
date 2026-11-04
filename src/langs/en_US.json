@@ -26,6 +26,7 @@
   "auth.check": "Check",
   "auth.login_tab": "Sign in",
   "auth.register_tab": "Sign up",
+  "auth.guest_mode": "Continue without account",
   "auth.back_to_accounts": "← Back to accounts",
   "auth.login_placeholder": "Login or Email",
   "auth.login_label": "Login",
@@ -153,6 +154,8 @@
   "settings.server_unreachable_confirm": "Could not connect to the server. Save the address anyway?",
   "settings.current_account": "Current account: @{login} on {url}",
   "settings.current_server": "Current server: {url}",
+  "settings.guest_mode": "Guest mode. Sign in to unlock all features.",
+  "settings.sign_in": "Sign in",
 
   "update.title": "Update Available",
   "update.text": "A new version {latest} is available (you have {current}).\n\nGo to GitHub to download?",
