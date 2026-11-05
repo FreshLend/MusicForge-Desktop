@@ -41,7 +41,7 @@ class DiscordRPC(QObject):
         self._settings = QSettings('MusicForge', 'DiscordRPC')
         self._enabled = self._settings.value('enabled', True, type=bool)
         Translator.instance().language_changed.connect(self._refresh_presence)
-        
+
         self._reconnect_timer = QTimer(self)
         self._reconnect_timer.setInterval(15000)
         self._reconnect_timer.timeout.connect(self._check_connection)
@@ -123,6 +123,8 @@ class DiscordRPC(QObject):
         self._refresh_presence()
 
     def sync_position(self, position_ms: int, duration_ms: int):
+        if not self._current_track or self._current_track.get('is_radio'):
+            return
         if duration_ms <= 0:
             return
         self._current_position_ms = position_ms
@@ -182,12 +184,12 @@ class DiscordRPC(QObject):
             artist = track.get('artist') or 'Unknown'
 
             details = 'MusicForge'
-            
+
             if self._context_name:
                 state = f"{title} • {self._context_name}"
             else:
                 state = title
-                
+
             large_text = artist
 
             if self._paused:
